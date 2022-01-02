@@ -5,7 +5,7 @@ use std::env;
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() != 2 {
+    if args.len() < 2 {
         eprintln!("Usage: {} FILE RESOLUTION", args[0]);
         eprintln!("Example: {} image.png low|medium|high", args[0]);
         std::process::exit(1);
@@ -24,4 +24,5 @@ fn main() {
 
     let mut dm = DiceMosaic::new(&filepath, 50, resolution);
     dm.process();
+    dm.stats();
 }
