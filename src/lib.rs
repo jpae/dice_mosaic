@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use uuid::Uuid;
 use image::{DynamicImage, GenericImage, GrayImage};
+use itertools::Itertools;
 
 const DICE_NUM: u8 = 6;
 
@@ -74,6 +75,19 @@ impl DiceMosaic {
         let img_name = format!("asset/output/{}.jpeg", Uuid::new_v4());
         println!("Creating {}", img_name);
         output_image.save(img_name).unwrap();
+    }
+
+    pub fn stats(&self) -> () {
+        let mut total_dice = 0;
+        for i in self.dice_counter.values() {
+            total_dice += i;
+        }
+
+        println!("Dice Counters:");
+        for (key, value) in self.dice_counter.iter().sorted_by_key(|x| x.0) {
+            println!("  dice face {}: {}", key + 1, value);
+        }
+        println!("Total dice needed: {}", total_dice);
     }
 
     fn initialize_dice() -> Result<Vec<DynamicImage>, String> {
