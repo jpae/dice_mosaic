@@ -1,3 +1,5 @@
+use std::time::{Instant};
+
 use std::collections::HashMap;
 use uuid::Uuid;
 use image::{DynamicImage, GenericImage, GrayImage};
@@ -54,27 +56,44 @@ impl DiceMosaic {
 
         // Image to save at the end of process
         let mut output_image = DynamicImage::new_rgba8(self.dimensions.0, self.dimensions.1);
-        
+
+        let start = Instant::now();
         for w in 0..self.dimensions.0 / self.dice_pixels {
             for h in 0..self.dimensions.1 / self.dice_pixels {
+                // Calculate averaged greyscale value
                 let value = DiceMosaic::avg_value(&self.img, (w * self.cell_width,
                                                                         h * self.cell_height), 
                                                              (self.cell_width,
                                                                         self.cell_height));
+                // Get which dice face the averaged greyscale value translates to
                 let num = DiceMosaic::dice_face(value);
                 let dice_img = &dice[num as usize];
+
+                // Keep a counter for stats()
                 let count = self.dice_counter.entry(num as u32).or_insert(0);
                 *count += 1;
 
+                // Copy the dice image to appropriate output_image location
                 output_image.copy_from(dice_img, w * self.dice_pixels, h * self.dice_pixels)
                             .unwrap_or_else(|err| eprintln!("{:?}", err));
             }
         }
+        let duration = start.elapsed();
+        println!("Time elapsed in double for loops is: {:?}", duration);
 
-        // Panic if failure to save image
+        // Testing
+
+        // End Testing
+
         let img_name = format!("asset/output/{}.jpeg", Uuid::new_v4());
         println!("Creating {}", img_name);
+
+        let start = Instant::now();
+        // Panic if failure to save image
         output_image.save(img_name).unwrap();
+
+        let duration = start.elapsed();
+        println!("Time elapsed in save() is: {:?}", duration);
     }
 
     pub fn stats(&self) -> () {
