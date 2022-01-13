@@ -1,5 +1,7 @@
-use std::time::{Instant};
+extern crate crossbeam;
 
+use std::time::{Instant};
+use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use uuid::Uuid;
 use image::{DynamicImage, GenericImage, GrayImage};
@@ -25,8 +27,10 @@ pub struct DiceMosaic {
     // The pixel dimensions of the diceX.png. Assumes a square image
     dice_pixels: u32,
     // Hash of how many dice of a specific dice face is used
-    dice_counter: HashMap<u32, u32>,
+    dice_counter: Arc<Mutex<HashMap<u32, u32>>>,
 }
+
+
 
 impl DiceMosaic {
     pub fn new(file: &String, dice_pixels: u32, resolution: Resolution) -> DiceMosaic {
@@ -43,7 +47,7 @@ impl DiceMosaic {
         let (img_cnt_x, img_cnt_y) = (dimensions.0 / dice_pixels, dimensions.1 / dice_pixels);
         let (cell_width, cell_height) = (x / img_cnt_x, y / img_cnt_y);
         // Initialize empty dice face counter
-        let dice_counter = HashMap::new();
+        let dice_counter = Arc::new(Mutex::new(HashMap::new()));
 
         DiceMosaic {
             img, dimensions, cell_width, cell_height, dice_pixels, dice_counter
@@ -52,45 +56,55 @@ impl DiceMosaic {
 
     pub fn process(&mut self) -> () {
         // Create DynamicImage objects of dice faces, panic if failure to process file
-        let dice: Vec<image::DynamicImage> = DiceMosaic::initialize_dice().unwrap();
-
+        let dice: Arc<Vec<image::DynamicImage>> = Arc::new(DiceMosaic::initialize_dice().unwrap());
         // Image to save at the end of process
-        let mut output_image = DynamicImage::new_rgba8(self.dimensions.0, self.dimensions.1);
+        let output_image = Arc::new(Mutex::new(DynamicImage::new_rgba8(self.dimensions.0, self.dimensions.1)));
 
         let start = Instant::now();
-        for w in 0..self.dimensions.0 / self.dice_pixels {
-            for h in 0..self.dimensions.1 / self.dice_pixels {
-                // Calculate averaged greyscale value
-                let value = DiceMosaic::avg_value(&self.img, (w * self.cell_width,
-                                                                        h * self.cell_height), 
-                                                             (self.cell_width,
-                                                                        self.cell_height));
-                // Get which dice face the averaged greyscale value translates to
-                let num = DiceMosaic::dice_face(value);
-                let dice_img = &dice[num as usize];
 
-                // Keep a counter for stats()
-                let count = self.dice_counter.entry(num as u32).or_insert(0);
-                *count += 1;
+        let self_arc = Arc::new(&self);
+        crossbeam::thread::scope(|s| {
+            for w in 0..self.dimensions.0 / self.dice_pixels {
+                for h in 0..self.dimensions.1 / self.dice_pixels {
+                    let output_image = Arc::clone(&output_image);
+                    let dice_images = Arc::clone(&dice);
+                    let counter = Arc::clone(&self.dice_counter);
+                    let self_copy = Arc::clone(&self_arc);
+                    s.spawn(move |_| {
 
-                // Copy the dice image to appropriate output_image location
-                output_image.copy_from(dice_img, w * self.dice_pixels, h * self.dice_pixels)
-                            .unwrap_or_else(|err| eprintln!("{:?}", err));
+                        // Calculate averaged greyscale value
+                        let value = DiceMosaic::avg_value(&self_copy.img, 
+                                                       (w * self_copy.cell_width,
+                                                               h * self_copy.cell_height), 
+                                                    (self_copy.cell_width,
+                                                        self_copy.cell_height));
+                        // Get which dice face the averaged greyscale value translates to
+                        let num = DiceMosaic::dice_face(value);
+                        let dice_img = &(*dice_images)[num as usize];
+
+                        // Keep a counter for stats()
+                        let mut count = counter.lock().unwrap();
+                        let test = count.entry(num as u32).or_insert(0);
+                        *test += 1;
+
+                        let mut output_image = output_image.lock().unwrap();
+                        // Copy the dice image to appropriate output_image location
+                        output_image.copy_from(dice_img, w * self_copy.dice_pixels, h * self_copy.dice_pixels)
+                        .unwrap_or_else(|err| eprintln!("{:?}", err));
+                    });
+                }
             }
-        }
+        }).unwrap();
+
         let duration = start.elapsed();
         println!("Time elapsed in double for loops is: {:?}", duration);
-
-        // Testing
-
-        // End Testing
 
         let img_name = format!("asset/output/{}.jpeg", Uuid::new_v4());
         println!("Creating {}", img_name);
 
         let start = Instant::now();
         // Panic if failure to save image
-        output_image.save(img_name).unwrap();
+        output_image.lock().unwrap().save(img_name).unwrap();
 
         let duration = start.elapsed();
         println!("Time elapsed in save() is: {:?}", duration);
@@ -98,12 +112,12 @@ impl DiceMosaic {
 
     pub fn stats(&self) -> () {
         let mut total_dice = 0;
-        for i in self.dice_counter.values() {
+        for i in self.dice_counter.lock().unwrap().values() {
             total_dice += i;
         }
 
         println!("Dice Counters:");
-        for (key, value) in self.dice_counter.iter().sorted_by_key(|x| x.0) {
+        for (key, value) in self.dice_counter.lock().unwrap().iter().sorted_by_key(|x| x.0) {
             println!("  dice face {}: {}", key + 1, value);
         }
         println!("Total dice needed: {}", total_dice);
